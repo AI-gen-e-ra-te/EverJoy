@@ -1,0 +1,60 @@
+# DigiPeople Core 后端依赖
+
+# Web 框架
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# WebSocket 客户端
+websockets==12.0
+websocket-client==1.6.4
+
+# 环境变量管理
+python-dotenv==1.0.0
+
+# 异步任务
+celery==5.3.4
+redis==5.0.1
+
+# 数据库 ORM（可选）
+sqlalchemy==2.0.23
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# 文件处理
+pydub==0.25.1
+python-magic==0.4.27
+Pillow==10.1.0
+
+# 音频处理
+librosa==0.10.1
+soundfile==0.12.1
+
+# HTTP 客户端
+httpx==0.25.2
+requests==2.31.0
+
+# 配置管理
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# 日志管理
+loguru==0.7.2
+
+# 工具库
+python-multipart==0.0.6
+aiofiles==23.2.1
+watchfiles==0.21.0
+
+# 开发工具
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+
+# 其他工具
+pyyaml==6.0.1
+click==8.1.7
+typing-extensions==4.8.0
+
+# Windows 特定（如果需要）
+# pywin32==306  # Windows API

@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: digipeople-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8000
+      - FAY_HOST=host.docker.internal
+      - FAY_PORT=10002
+      - FAY_WS_URL=ws://host.docker.internal:10002
+      - MUSETALK_PATH=/app/musetalk
+      - MUSETALK_MODEL_VERSION=v15
+      - MUSETALK_USE_FLOAT16=true
+      - DATA_DIR=/app/data
+      - AVATAR_DIR=/app/data/avatars
+      - AUDIO_DIR=/app/data/audio
+      - VIDEO_DIR=/app/data/videos
+      - UPLOAD_DIR=/app/data/uploads
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./Fay:/app/fay:ro
+      - ./MuseTalk:/app/musetalk:ro
+      - ./backend/logs:/app/logs
+    depends_on:
+      - fay
+      - musetalk
+    networks:
+      - digipeople-network
+
+  fay:
+    build:
+      context: ./Fay
+      dockerfile: ../Dockerfile.fay
+    container_name: digipeople-fay
+    restart: unless-stopped
+    ports:
+      - "10002:10002"  # WebSocket 接口
+      - "5000:5000"    # 管理界面
+      - "5010:5010"    # MCP 管理服务
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./Fay/config.json:/app/config.json
+      - ./Fay/qa.csv:/app/qa.csv
+      - ./Fay/samples:/app/samples
+      - ./Fay/cache_data:/app/cache_data
+      - ./Fay/logs:/app/logs
+    networks:
+      - digipeople-network
+
+  musetalk:
+    build:
+      context: ./MuseTalk
+      dockerfile: ../Dockerfile.musetalk
+    container_name: digipeople-musetalk
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FFMPEG_PATH=/usr/bin/ffmpeg
+    volumes:
+      - ./MuseTalk/models:/app/models
+      - ./MuseTalk/results:/app/results
+      - ./data/audio:/app/audio_input:ro
+      - ./data/videos:/app/video_output
+    networks:
+      - digipeople-network
+
+  # 如果需要数据库，可以添加 PostgreSQL 或 Redis
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: digipeople-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - digipeople-network
+
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: digipeople-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     - POSTGRES_USER=digipeople
+  #     - POSTGRES_PASSWORD=digipeople_pass
+  #     - POSTGRES_DB=digipeople
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   networks:
+  #     - digipeople-network
+
+networks:
+  digipeople-network:
+    driver: bridge
+
+volumes:
+  # 如果需要持久化数据，可以取消注释以下行
+  # redis-data:
+  # postgres-data:

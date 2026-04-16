@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DigiPeople Core - 第四阶段：Fay WS 皮肤客户端</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* 简化样式用于第一阶段 */
+        .minimal-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 2rem;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .main-area {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        @media (max-width: 768px) {
+            .main-area {
+                grid-template-columns: 1fr;
+            }
+        }
+        .upload-section, .task-section {
+            background: var(--bg-card);
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-md);
+        }
+        .video-player {
+            width: 100%;
+            height: 300px;
+            background: #000;
+            border-radius: var(--border-radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            margin-bottom: 1rem;
+        }
+        .video-player video {
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .task-status {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .task-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="minimal-container">
+        <div class="header">
+            <h1><i class="fas fa-robot"></i> DigiPeople Core - Fay WS 皮肤客户端</h1>
+            <p>Fay(LLM+TTS) → WebSocket 10002 → MuseTalk 唇形同步视频</p>
+        </div>
+
+        <div class="main-area">
+            <!-- 左侧：上传和控制区域 -->
+            <div class="upload-section">
+                <h2><i class="fas fa-upload"></i> 上传MP4文件</h2>
+                <div class="upload-area" id="mp4-drop-area" style="margin: 1rem 0;">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>拖放MP4文件到这里，或点击选择文件</p>
+                    <p class="upload-hint">支持MP4格式视频文件</p>
+                    <input type="file" id="mp4-file-input" accept=".mp4" hidden>
+                    <button id="select-mp4-btn" class="btn btn-secondary">选择MP4文件</button>
+                </div>
+
+                <h3><i class="fas fa-edit"></i> 文本输入</h3>
+                <textarea id="text-input" class="textarea-control" placeholder="输入文本内容..." rows="4" style="width: 100%; margin-bottom: 1rem;"></textarea>
+
+                <button id="submit-btn" class="btn btn-primary" style="width: 100%;">
+                    <i class="fas fa-paper-plane"></i> 提交处理
+                </button>
+
+                <div style="margin-top: 2rem;">
+                    <h3><i class="fas fa-comments"></i> 对话回复</h3>
+                    <div id="conversation-reply" class="reply-area" style="background: #f5f5f5; padding: 1rem; border-radius: var(--border-radius); min-height: 100px;">
+                        <p style="color: #888; font-style: italic;">Fay生成的回复将显示在这里...</p>
+                    </div>
+                </div>
+
+                <div class="status-bar" style="margin-top: 1rem;">
+                    <div class="status-item">
+                        <i class="fas fa-signal"></i>
+                        <span id="api-status">API状态: 未检查</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：视频播放和任务状态 -->
+            <div class="task-section">
+                <h2><i class="fas fa-video"></i> 视频播放区域</h2>
+                <div class="video-player" id="video-player">
+                    <div id="video-placeholder">
+                        <i class="fas fa-video" style="font-size: 3rem; margin-bottom: 1rem;"></i>
+                        <p>视频将在这里播放</p>
+                    </div>
+                    <video id="output-video" controls style="display: none;"></video>
+                </div>
+
+                <h3><i class="fas fa-tasks"></i> 任务状态区域</h3>
+                <div class="task-status" id="task-status">
+                    <div class="task-item">
+                        <strong>任务ID:</strong> <span>--</span><br>
+                        <strong>状态:</strong> <span class="status-pending">等待中</span><br>
+                        <strong>进度:</strong> <span>0%</span>
+                    </div>
+                    <div class="task-item">
+                        <strong>系统状态:</strong> <span class="status-running">后端服务运行中</span><br>
+                        <strong>健康检查:</strong> <span id="health-status">未检查</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button id="check-health-btn" class="btn btn-secondary">
+                        <i class="fas fa-heartbeat"></i> 检查健康状态
+                    </button>
+                    <button id="refresh-tasks-btn" class="btn btn-secondary">
+                        <i class="fas fa-sync-alt"></i> 刷新任务
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 2rem; color: var(--text-tertiary);">
+            <p>第四阶段：Fay WS 皮肤客户端模式 | Fay 处理 LLM+TTS，本服务监听音频并渲染唇形同步视频</p>
+            <p>后端API: <code id="api-url">http://localhost:8002</code> | 渲染器: <code>/api/renderer/latest</code> | 直连: <code>/api/conversations/reply</code></p>
+        </div>
+    </div>
+
+    <!-- 通知容器 -->
+    <div id="notification-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
