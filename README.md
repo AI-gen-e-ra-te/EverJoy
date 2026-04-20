@@ -1,175 +1,177 @@
-# DigiPeople Core - 数字人核心系统
+# DigiPeople Core - Digital Human Core System
 
-基于 Fay 数字人框架和 MuseTalk 唇形同步技术的完整数字人解决方案。
+**Language / 语言**: **English** | [简体中文](./README.zh-CN.md)
 
-用户输入文本 → Fay 调用 LLM 生成回复 → TTS 语音合成 → MuseTalk 唇形同步 → 输出说话视频
+A complete digital human solution built on top of the Fay digital human framework and the MuseTalk lip-sync model.
 
-## 系统架构
+User input (text) → Fay calls LLM to generate a reply → TTS speech synthesis → MuseTalk lip-sync → Talking-head video output.
+
+## System Architecture
 
 ```
 ┌─────────┐    ┌──────────────────┐    ┌──────────────┐    ┌───────────┐
-│  前端    │───▶│  后端 (FastAPI)   │───▶│  Fay 服务     │───▶│ LLM 服务   │
-│ :8002   │    │  :8002           │    │  HTTP :5000  │    │ (Ollama)  │
-│         │◀───│                  │◀───│  WS :10002   │    │ :11434    │
+│Frontend │───▶│ Backend (FastAPI)│───▶│  Fay Service │───▶│ LLM (e.g. │
+│ :8002   │    │  :8002           │    │  HTTP :5000  │    │  Ollama)  │
+│         │◀───│                  │◀───│  WS   :10002 │    │  :11434   │
 └─────────┘    │  ┌─────────┐    │    └──────────────┘    └───────────┘
                │  │  TTS    │    │
                │  │Edge-TTS │    │
                │  └────┬────┘    │
                │       ▼         │
                │  ┌──────────┐   │
-               │  │MuseTalk  │   │
-               │  │ GPU推理   │   │
+               │  │ MuseTalk │   │
+               │  │ GPU Inf. │   │
                │  └──────────┘   │
                └──────────────────┘
 ```
 
-两种工作模式：
-- **直连模式**：后端 API 收到请求后串行调用 Fay → TTS → MuseTalk
-- **WS 皮肤客户端模式**：后端通过 WebSocket 连接 Fay 10002 端口，监听 Fay 发出的音频消息后自动触发 MuseTalk
+Two working modes:
+- **Direct mode**: the backend API handles a request by serially calling Fay → TTS → MuseTalk.
+- **WS skin-client mode**: the backend connects to Fay's port 10002 over WebSocket, listens for audio messages emitted by Fay, and automatically triggers MuseTalk.
 
-## 环境要求
+## Requirements
 
-| 项目 | 最低要求 | 推荐配置 |
-|------|---------|---------|
-| 操作系统 | Windows 10 / Linux | Windows 10/11 |
-| Python | 3.10 | 3.10（MuseTalk 兼容性最佳） |
-| GPU | 无（CPU 极慢） | NVIDIA RTX 4060 及以上，8GB+ 显存 |
+| Item | Minimum | Recommended |
+|------|---------|-------------|
+| OS | Windows 10 / Linux | Windows 10/11 |
+| Python | 3.10 | 3.10 (best compatibility with MuseTalk) |
+| GPU | None (CPU is extremely slow) | NVIDIA RTX 4060 or above, 8 GB+ VRAM |
 | CUDA | 11.7+ | 11.8 |
-| 内存 | 8 GB | 16 GB |
-| FFmpeg | 必须安装 | 系统 PATH 中可用 |
-| 磁盘 | 10 GB | 20 GB（含模型权重） |
+| RAM | 8 GB | 16 GB |
+| FFmpeg | Required | Available in system PATH |
+| Disk | 10 GB | 20 GB (including model weights) |
 
-## 安装步骤
+## Installation
 
-### 第一步：克隆项目并获取第三方依赖
+### Step 1: Clone the project and third-party dependencies
 
-本项目依赖 [Fay](https://github.com/TheRamU/Fay) 和 [MuseTalk](https://github.com/TMElyralab/MuseTalk)，它们不包含在本仓库中，需要单独 clone。
+This project depends on [Fay](https://github.com/TheRamU/Fay) and [MuseTalk](https://github.com/TMElyralab/MuseTalk). They are **not** bundled in this repository and must be cloned separately.
 
 ```bash
-# 1. 克隆本项目
+# 1. Clone this project
 git clone <your-repo-url>
 cd <your-repo-name>
 
-# 2. 克隆 Fay 数字人框架到 Fay/ 目录
+# 2. Clone the Fay framework into the Fay/ directory
 git clone https://github.com/TheRamU/Fay.git Fay
 
-# 3. 克隆 MuseTalk 唇形同步模型到 MuseTalk/ 目录
+# 3. Clone MuseTalk into the MuseTalk/ directory
 git clone https://github.com/TMElyralab/MuseTalk.git MuseTalk
 ```
 
-> **注意**：Fay 和 MuseTalk 是独立的第三方开源项目，请遵循各自的许可证。本项目仅提供集成层代码。
+> **Note**: Fay and MuseTalk are independent third-party open-source projects. Please comply with their respective licenses. This repository only provides the integration layer.
 
-### 第二步：安装 FFmpeg
+### Step 2: Install FFmpeg
 
-MuseTalk 和 TTS 都依赖 FFmpeg 进行音视频处理。
+Both MuseTalk and the TTS engine rely on FFmpeg for audio/video processing.
 
-**Windows**：
-1. 从 https://github.com/BtbN/FFmpeg-Builds/releases 下载 `ffmpeg-master-latest-win64-gpl.zip`
-2. 解压到任意目录（如 `C:\ffmpeg`）
-3. 将 `C:\ffmpeg\bin` 添加到系统环境变量 `PATH`
-4. 打开新终端验证：`ffmpeg -version`
+**Windows**:
+1. Download `ffmpeg-master-latest-win64-gpl.zip` from https://github.com/BtbN/FFmpeg-Builds/releases
+2. Extract it to any directory (e.g. `C:\ffmpeg`)
+3. Add `C:\ffmpeg\bin` to the system `PATH` environment variable
+4. Open a new terminal and verify: `ffmpeg -version`
 
-**Linux**：
+**Linux**:
 ```bash
 sudo apt update && sudo apt install ffmpeg -y
 ```
 
-### 第三步：安装 Fay
+### Step 3: Install Fay
 
-Fay 是独立的数字人对话框架，提供 LLM 对话、记忆管理等功能。
+Fay is a standalone digital human dialogue framework that provides LLM chat, memory management, etc.
 
 ```powershell
-# 进入 Fay 目录
+# Enter the Fay directory
 cd Fay
 
-# 创建 Python 虚拟环境（Fay 使用 Python 3.12）
+# Create a Python virtual environment (Fay uses Python 3.12)
 python -m venv .venv
 
-# 激活虚拟环境
+# Activate the virtual environment
 # Windows PowerShell:
 .\.venv\Scripts\Activate.ps1
 # Linux/Mac:
 # source .venv/bin/activate
 
-# 安装 Fay 依赖
+# Install Fay dependencies
 pip install -r requirements.txt
 
-# 回到项目根目录
+# Return to the project root
 cd ..
 ```
 
-#### 配置 Fay 的 LLM
+#### Configure Fay's LLM
 
-Fay 通过 `system.conf` 配置 LLM。首次启动时会从配置中心拉取默认配置，你也可以手动创建 `Fay/system.conf`：
+Fay reads LLM settings from `system.conf`. On first launch it pulls a default config from the config center; alternatively, you can create `Fay/system.conf` manually:
 
 ```ini
 [key]
-# 使用 Ollama 本地模型
+# Use a local Ollama model
 gpt_base_url = http://localhost:11434/v1
 gpt_model_engine = llama3.2
 gpt_api_key = sk-ollama
 
-# 或使用云端 API（如 SiliconFlow）
+# Or use a cloud API (e.g. SiliconFlow)
 # gpt_base_url = https://api.siliconflow.cn/v1
 # gpt_model_engine = zai-org/GLM-4.6
 # gpt_api_key = sk-your-api-key
 ```
 
-如果使用 Ollama，确保先安装并拉取模型：
+If you use Ollama, make sure it is installed and the model is pulled:
 ```bash
-# 安装 Ollama 后
+# After installing Ollama
 ollama pull llama3.2
 ```
 
-### 第四步：安装 MuseTalk
+### Step 4: Install MuseTalk
 
-MuseTalk 是音频驱动的唇形同步模型，需要独立的 Python 环境（Python 3.10）。
+MuseTalk is an audio-driven lip-sync model and requires its own Python environment (Python 3.10).
 
 ```powershell
-# 进入 MuseTalk 目录
+# Enter the MuseTalk directory
 cd MuseTalk
 
-# 创建独立虚拟环境（必须使用 Python 3.10）
-# 如果系统默认不是 3.10，请指定路径或使用 conda
+# Create an isolated virtual environment (Python 3.10 is required)
+# If your system default is not 3.10, specify the path or use conda
 python -m venv venv
-# 或: conda create -n musetalk python=3.10 && conda activate musetalk
+# or: conda create -n musetalk python=3.10 && conda activate musetalk
 
-# 激活虚拟环境
+# Activate the virtual environment
 # Windows PowerShell:
 .\venv\Scripts\Activate.ps1
 # Linux/Mac:
 # source venv/bin/activate
 ```
 
-#### 4.1 安装 PyTorch（带 CUDA 支持）
+#### 4.1 Install PyTorch (with CUDA support)
 
-根据你的 CUDA 版本选择对应的 PyTorch：
+Pick the PyTorch wheel that matches your CUDA version:
 
 ```bash
-# CUDA 11.8（推荐）
+# CUDA 11.8 (recommended)
 pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 
 # CUDA 12.1
 # pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu121
 
-# 仅 CPU（非常慢，不推荐）
+# CPU only (very slow, not recommended)
 # pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cpu
 ```
 
-验证 CUDA：
+Verify CUDA:
 ```bash
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
 
-#### 4.2 安装 MuseTalk 基础依赖
+#### 4.2 Install MuseTalk base dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-#### 4.3 安装 OpenMMLab 生态
+#### 4.3 Install the OpenMMLab stack
 
-MuseTalk 依赖 mmcv、mmdet、mmpose 进行人脸检测和姿态估计：
+MuseTalk relies on mmcv / mmdet / mmpose for face detection and pose estimation:
 
 ```bash
 pip install --no-cache-dir -U openmim
@@ -179,88 +181,88 @@ mim install "mmdet==3.1.0"
 mim install "mmpose==1.1.0"
 ```
 
-> **Windows 常见问题**：如果 `mmcv` 编译失败，尝试 `pip install mmcv-lite>=2.0.1` 作为替代。
+> **Common issue on Windows**: if `mmcv` fails to compile, try `pip install mmcv-lite>=2.0.1` as a fallback.
 
-#### 4.4 下载模型权重
+#### 4.4 Download model weights
 
-确保以下模型已下载到 `MuseTalk/models/` 目录：
+Make sure the following model files are placed under `MuseTalk/models/`:
 
 ```
 MuseTalk/models/
-├── musetalkV15/          # MuseTalk v1.5 模型（推荐）
+├── musetalkV15/          # MuseTalk v1.5 (recommended)
 │   ├── unet.pth
 │   └── musetalk.json
-├── whisper/              # Whisper 音频编码器
-├── dwpose/               # 人体姿态检测
+├── whisper/              # Whisper audio encoder
+├── dwpose/               # Pose detection
 ├── sd-vae/               # Stable Diffusion VAE
-├── face-parse-bisent/    # 人脸解析
-└── syncnet/              # 音视频同步网络
+├── face-parse-bisent/    # Face parsing
+└── syncnet/              # Audio-visual sync network
 ```
 
-模型下载方式参考 [MuseTalk 官方仓库](https://github.com/TMElyralab/MuseTalk)。
+Refer to the [official MuseTalk repo](https://github.com/TMElyralab/MuseTalk) for download instructions.
 
 ```bash
-# 回到项目根目录
+# Return to the project root
 cd ..
 ```
 
-### 第五步：安装后端依赖
+### Step 5: Install backend dependencies
 
 ```powershell
-# 激活 Fay 的虚拟环境（后端与 Fay 共用环境）
+# Activate the Fay virtual environment (backend shares the same env as Fay)
 cd Fay
 .\.venv\Scripts\Activate.ps1
 cd ..
 
-# 安装后端依赖
+# Install backend dependencies
 cd backend
 pip install -r requirements.txt
 
-# Edge-TTS（默认 TTS 引擎，需单独安装）
+# Edge-TTS (default TTS engine, installed separately)
 pip install edge-tts
 
 cd ..
 ```
 
-### 第六步：配置环境变量
+### Step 6: Configure environment variables
 
 ```powershell
-# 复制环境变量模板
+# Copy the environment template
 copy .env.example .env   # Windows
 # cp .env.example .env   # Linux/Mac
 ```
 
-编辑 `.env`，关键配置项：
+Edit `.env`. Key settings:
 
 ```ini
-# 后端端口
+# Backend port
 BACKEND_PORT=8002
 
-# MuseTalk Python 解释器路径（指向 MuseTalk 的独立 venv）
-MUSETALK_PYTHON_PATH=C:\你的路径\fay\MuseTalk\venv\Scripts\python.exe
+# Path to the MuseTalk Python interpreter (point to MuseTalk's isolated venv)
+MUSETALK_PYTHON_PATH=C:\your\path\fay\MuseTalk\venv\Scripts\python.exe
 
-# GPU 半精度加速（有 GPU 设为 true）
+# GPU half-precision acceleration (set to true if you have a GPU)
 MUSETALK_USE_FLOAT16=true
 
-# MuseTalk 模型版本
+# MuseTalk model version
 MUSETALK_MODEL_VERSION=v15
 ```
 
-## 开始使用
+## Getting Started
 
-### 启动顺序
+### Startup order
 
-必须按以下顺序启动三个服务，每个服务在**独立的终端窗口**中运行：
+The three services must be started in the following order, each in its **own terminal window**:
 
-#### 终端 1：启动 LLM 服务（如使用 Ollama）
+#### Terminal 1: Start the LLM service (e.g. Ollama)
 
 ```bash
 ollama serve
 ```
 
-Ollama 默认监听 `http://localhost:11434`。如果已经作为系统服务运行则跳过此步。
+Ollama listens on `http://localhost:11434` by default. Skip this step if it already runs as a system service.
 
-#### 终端 2：启动 Fay
+#### Terminal 2: Start Fay
 
 ```powershell
 cd Fay
@@ -268,18 +270,18 @@ cd Fay
 python main.py start
 ```
 
-等待看到以下日志表示 Fay 启动成功：
+Fay has started successfully when you see log lines like:
 ```
 [系统] 服务启动完成!
 Uvicorn running on http://0.0.0.0:8765
 ```
 
-Fay 提供的服务端口：
-- **HTTP API**: `http://127.0.0.1:5000`（LLM 对话接口）
-- **WebSocket**: `ws://127.0.0.1:10002`（数字人消息接口）
-- **MCP SSE**: `http://127.0.0.1:8765`（MCP 服务）
+Ports exposed by Fay:
+- **HTTP API**: `http://127.0.0.1:5000` (LLM chat endpoint)
+- **WebSocket**: `ws://127.0.0.1:10002` (digital human message channel)
+- **MCP SSE**: `http://127.0.0.1:8765` (MCP service)
 
-#### 终端 3：启动后端
+#### Terminal 3: Start the backend
 
 ```powershell
 cd Fay
@@ -288,173 +290,174 @@ cd ..\backend
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8002
 ```
 
-等待看到以下日志：
+Wait until you see:
 ```
 服务初始化完成（含 MuseTalk 渲染器 WS 客户端）
 Application startup complete.
 Uvicorn running on http://0.0.0.0:8002
-已连接 Fay WebSocket 10002          ← 确认 Fay 已连接
+已连接 Fay WebSocket 10002          ← confirms Fay is connected
 ```
 
-### 使用流程
+### Usage flow
 
-1. **打开浏览器**访问 `http://localhost:8002`
+1. **Open your browser** and visit `http://localhost:8002`
 
-2. **上传头像视频**：点击上传区域选择一段包含正脸的 MP4 视频（这将作为数字人的形象素材）
+2. **Upload an avatar video**: click the upload area and choose an MP4 clip with a clearly visible frontal face (it will be used as the digital human's appearance).
 
-3. **等待预处理完成**：上传后系统会自动提取视频帧和元数据
+3. **Wait for preprocessing**: the system automatically extracts frames and metadata after upload.
 
-4. **输入文本**：在文本框中输入想说的话（如"你好，请介绍你自己"）
+4. **Type your text**: enter whatever you want the avatar to say (e.g. "Hello, please introduce yourself").
 
-5. **点击提交处理**：系统自动执行完整流程：
-   - 将文本发送给 Fay → Fay 调用 LLM 生成回复
-   - 回复文本通过 TTS 合成为 WAV 音频
-   - MuseTalk 使用音频 + 头像视频生成口型同步视频
-   - 前端自动加载并播放生成的视频
+5. **Click submit**: the system runs the full pipeline:
+   - Send text to Fay → Fay calls the LLM to generate a reply
+   - The reply is synthesized to a WAV audio via TTS
+   - MuseTalk combines the audio with the avatar video to produce a lip-synced video
+   - The frontend loads and plays the generated video automatically
 
-6. **查看结果**：页面右侧会显示回复文本和生成的视频
+6. **View the result**: the reply text and generated video are shown on the right side of the page.
 
-> **首次推理耗时较长**（5-7 分钟），因为需要加载模型到 GPU。后续调用会快很多（1-2 分钟）。
+> **The first inference takes longer** (5–7 minutes) because the model has to be loaded onto the GPU. Subsequent calls are much faster (1–2 minutes).
 
-## API 接口
+## API Reference
 
-启动后访问 `http://localhost:8002/docs` 查看完整 Swagger 文档。
+After startup, visit `http://localhost:8002/docs` for the full Swagger documentation.
 
-主要接口：
+Main endpoints:
 
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/api/health/` | GET | 健康检查，返回各服务状态 |
-| `/api/avatars/upload` | POST | 上传 MP4 头像视频 |
-| `/api/avatars/{id}/info` | GET | 查询头像信息 |
-| `/api/conversations/reply` | POST | 发送文本，获取回复+音频+视频 |
-| `/api/conversations/reply-stream` | POST | 流式回复 |
-| `/api/renderer/latest` | GET | 查询最近一次 WS 渲染结果 |
-| `/api/renderer/set-default-avatar` | POST | 设置默认头像 |
-| `/api/tasks/{id}/status` | GET | 查询任务状态 |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health/` | GET | Health check, returns status of each service |
+| `/api/avatars/upload` | POST | Upload an MP4 avatar video |
+| `/api/avatars/{id}/info` | GET | Query avatar info |
+| `/api/conversations/reply` | POST | Send text, get reply + audio + video |
+| `/api/conversations/reply-stream` | POST | Streaming reply |
+| `/api/renderer/latest` | GET | Get the most recent WS render result |
+| `/api/renderer/set-default-avatar` | POST | Set the default avatar |
+| `/api/tasks/{id}/status` | GET | Query task status |
 
-### 对话 API 示例
+### Conversation API example
 
 ```bash
 curl -X POST http://localhost:8002/api/conversations/reply \
   -H "Content-Type: application/json" \
-  -d '{"text": "你好", "username": "User", "avatar_id": "your_avatar_id"}'
+  -d '{"text": "Hello", "username": "User", "avatar_id": "your_avatar_id"}'
 ```
 
-## 目录结构
+## Project Structure
 
 ```
 fay/
-├── .env                    # 环境变量配置
-├── README.md
-├── CLAUDE.md               # AI 助手配置说明
-├── backend/                # 后端服务 (FastAPI)
+├── .env                    # Environment variables
+├── README.md               # English docs (default)
+├── README.zh-CN.md         # Chinese docs
+├── CLAUDE.md               # AI assistant configuration notes
+├── backend/                # Backend service (FastAPI)
 │   ├── app/
-│   │   ├── main.py         # 入口，服务初始化
-│   │   ├── config.py       # 配置管理
-│   │   ├── api/            # API 路由
+│   │   ├── main.py         # Entry point, service initialization
+│   │   ├── config.py       # Configuration management
+│   │   ├── api/            # API routes
 │   │   │   ├── health.py
 │   │   │   ├── avatars.py
 │   │   │   ├── conversations.py
 │   │   │   └── renderer.py
-│   │   └── services/       # 业务服务
-│   │       ├── fay_client.py           # Fay HTTP 客户端
-│   │       ├── tts_service.py          # TTS 语音合成
-│   │       ├── musetalk_service.py     # MuseTalk 推理
-│   │       ├── musetalk_renderer_ws.py # WS 皮肤客户端
-│   │       ├── avatar_service.py       # 头像管理
-│   │       └── job_service.py          # 任务队列
+│   │   └── services/       # Business services
+│   │       ├── fay_client.py           # Fay HTTP client
+│   │       ├── tts_service.py          # TTS speech synthesis
+│   │       ├── musetalk_service.py     # MuseTalk inference
+│   │       ├── musetalk_renderer_ws.py # WS skin client
+│   │       ├── avatar_service.py       # Avatar management
+│   │       └── job_service.py          # Task queue
 │   └── requirements.txt
-├── frontend/               # 前端 (HTML/CSS/JS)
+├── frontend/               # Frontend (HTML/CSS/JS)
 │   ├── index.html
 │   ├── app.js
 │   └── styles.css
-├── Fay/                    # [需单独 clone] Fay 数字人框架
-├── MuseTalk/               # [需单独 clone] MuseTalk 唇形同步
-├── data/                   # 运行时数据
-│   ├── uploads/            # 用户上传的原始文件
-│   ├── avatars/            # 预处理后的头像数据
-│   ├── audio/              # TTS 生成的音频
-│   ├── videos/             # MuseTalk 生成的视频
-│   └── temp/               # 临时文件
-├── tests/                  # 测试脚本
-└── scripts/                # 工具脚本
+├── Fay/                    # [clone separately] Fay framework
+├── MuseTalk/               # [clone separately] MuseTalk lip-sync
+├── data/                   # Runtime data
+│   ├── uploads/            # User-uploaded raw files
+│   ├── avatars/            # Preprocessed avatar data
+│   ├── audio/              # TTS-generated audio
+│   ├── videos/             # MuseTalk-generated videos
+│   └── temp/               # Temporary files
+├── tests/                  # Test scripts
+└── scripts/                # Utility scripts
 ```
 
-## 配置说明
+## Configuration
 
-### TTS 引擎选择
+### TTS engine selection
 
-在 `.env` 中设置 `TTS_ENGINE`：
+Set `TTS_ENGINE` in `.env`:
 
-| 引擎 | 值 | 说明 |
-|------|---|------|
-| Edge-TTS | `edge_tts` | 微软在线语音合成，免费，质量好（默认） |
-| CosyVoice | `cosy_voice` | 腾讯开源模型，需本地部署 |
-| VITS | `vits` | 本地模型，需下载权重 |
-| Mock | `mock` | 生成静音占位音频，仅用于测试 |
+| Engine | Value | Description |
+|--------|-------|-------------|
+| Edge-TTS | `edge_tts` | Microsoft online TTS, free and high quality (default) |
+| CosyVoice | `cosy_voice` | Tencent open-source model, requires local deployment |
+| VITS | `vits` | Local model, weights must be downloaded |
+| Mock | `mock` | Generates silent placeholder audio, for testing only |
 
-### MuseTalk 参数调优
+### MuseTalk tuning
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `MUSETALK_MODEL_VERSION` | `v15` | 模型版本，v15 质量更好 |
-| `MUSETALK_USE_FLOAT16` | `true` | GPU 半精度加速，减少显存占用 |
-| `MUSETALK_BBOX_SHIFT` | `0` | 人脸边界框偏移，调整嘴部位置 |
-| `MUSETALK_FPS` | `25` | 输出视频帧率 |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MUSETALK_MODEL_VERSION` | `v15` | Model version; v15 has better quality |
+| `MUSETALK_USE_FLOAT16` | `true` | GPU half precision, lower VRAM usage |
+| `MUSETALK_BBOX_SHIFT` | `0` | Face bounding-box offset, adjusts mouth position |
+| `MUSETALK_FPS` | `25` | Output video frame rate |
 
-## 故障排除
+## Troubleshooting
 
-### Fay 回复超时（返回模拟回复）
+### Fay reply times out (falls back to a mock reply)
 
-Fay 调用 LLM 可能耗时较长（尤其是云端 API），如果后端日志显示 `Fay API 调用异常`：
-- 检查 `backend/app/config.py` 中 `FAY_TIMEOUT` 的值（默认 120 秒）
-- 云端 LLM 首次调用可能需要更长时间，可适当增大超时
+Fay's LLM calls can be slow (especially for cloud APIs). If the backend log shows `Fay API 调用异常`:
+- Check `FAY_TIMEOUT` in `backend/app/config.py` (default 120 seconds)
+- Cloud LLMs may need longer on the first call; increase the timeout as needed
 
-### MuseTalk 报错 "DLL load failed"
+### MuseTalk error: "DLL load failed"
 
-PyTorch 安装损坏或 CUDA 版本不匹配：
+PyTorch is broken or the CUDA version does not match:
 ```bash
 cd MuseTalk
 .\venv\Scripts\Activate.ps1
 pip install torch==2.0.1+cu118 --index-url https://download.pytorch.org/whl/cu118 --force-reinstall --no-deps
 ```
 
-验证修复：
+Verify the fix:
 ```bash
 python -c "import torch; print(torch.cuda.is_available())"
 ```
 
-### MuseTalk 推理非常慢
+### MuseTalk inference is very slow
 
-- 确认 `MUSETALK_USE_FLOAT16=true`
-- 确认 PyTorch 检测到 GPU：`torch.cuda.is_available() == True`
-- 首次推理需加载模型（5-7 分钟），后续会快很多
-- CPU 推理可能需要 10 分钟以上，强烈建议使用 GPU
+- Make sure `MUSETALK_USE_FLOAT16=true`
+- Make sure PyTorch actually detects a GPU: `torch.cuda.is_available() == True`
+- The first inference loads the model (5–7 minutes); later runs are much faster
+- CPU inference may take 10+ minutes; using a GPU is strongly recommended
 
-### 头像上传后 MuseTalk 被跳过
+### MuseTalk is skipped after uploading an avatar
 
-MuseTalk 只接受视频文件（`.mp4`、`.avi`、`.mov` 等），不接受图片。确保上传的是 MP4 视频文件。
+MuseTalk only accepts video files (`.mp4`, `.avi`, `.mov`, etc.) — images are not supported. Make sure you upload an MP4 video.
 
-### Fay WebSocket 10002 连接失败
+### Fay WebSocket 10002 fails to connect
 
-后端日志显示 `Fay WebSocket 连接失败`：
-- 确认 Fay 已启动且 10002 端口可用
-- 后端会自动重连，启动 Fay 后即可恢复
+If the backend log shows `Fay WebSocket 连接失败`:
+- Make sure Fay is running and port 10002 is available
+- The backend auto-reconnects and will recover once Fay is up
 
-### 清除 Fay 对话记忆
+### Clear Fay's conversation memory
 
-如果想让 Fay 忘掉之前的对话：
+If you want Fay to forget previous conversations:
 ```powershell
-# 先停止 Fay，然后删除记忆目录
+# Stop Fay first, then remove the memory directory
 Remove-Item "Fay/memory" -Recurse -Force
 ```
 
-## 许可证
+## License
 
-本项目基于 MIT 许可证开源，具体组件请参考各自项目的许可证。
+This project is released under the MIT license. Please refer to the upstream projects for their respective licenses.
 
-## 致谢
+## Acknowledgements
 
-- [Fay 数字人框架](https://github.com/TheRamU/Fay)
+- [Fay digital human framework](https://github.com/TheRamU/Fay)
 - [MuseTalk](https://github.com/TMElyralab/MuseTalk)
