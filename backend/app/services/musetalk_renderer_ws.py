@@ -70,6 +70,10 @@ class MuseTalkRendererWS:
         self._render_lock = asyncio.Lock()
         self._is_rendering = False
 
+        # 音频片段收集（等所有片段到齐再渲染）
+        self._audio_chunks: list = []     # [(path, text, duration), ...]
+        self._collect_username: Optional[str] = None
+
     # ------------------------------------------------------------------
     # 公开接口
     # ------------------------------------------------------------------
@@ -171,12 +175,13 @@ class MuseTalkRendererWS:
                 self._quiet_mode = False
                 logger.info("已连接 Fay WebSocket 10002")
 
-                # 注册身份：设置 Username 和 Output（允许接收音频）
+                # 注册身份：Username 必须与 Fay 消息中的 Username 一致（默认 "User"），
+                # 否则 Fay 的定向推送不会到达此客户端
                 await ws.send(json.dumps({
-                    "Username": "MuseTalkRenderer",
+                    "Username": "User",
                     "Output": True,
                 }, ensure_ascii=False))
-                logger.info("已发送身份注册: Username=MuseTalkRenderer, Output=True")
+                logger.info("已发送身份注册: Username=User, Output=True")
 
                 async for raw_message in ws:
                     if not self._running:
@@ -239,7 +244,10 @@ class MuseTalkRendererWS:
 
     async def _on_audio(self, data: dict, username: Optional[str]):
         """
-        收到 Fay TTS 生成的音频，触发 MuseTalk 渲染。
+        收到 Fay TTS 生成的音频。
+        Fay 会把一段完整回复拆成多个小句子分别合成，每个发一条 audio 消息。
+        我们收集所有片段，等 IsEnd=1 时合并成完整音频再启动 MuseTalk。
+
         Data 包含:
           - Value: 本地绝对路径
           - HttpValue: HTTP URL
@@ -251,20 +259,59 @@ class MuseTalkRendererWS:
         audio_http_url = data.get("HttpValue", "")
         text = data.get("Text", "")
         audio_time = data.get("Time", 0)
+        is_first = data.get("IsFirst", 0)
         is_end = data.get("IsEnd", 0)
 
         logger.info(
             f"收到音频 [{username}]: path={audio_local_path}, "
-            f"text={text[:40]}..., duration={audio_time}s"
+            f"text={text[:40]}..., duration={audio_time}s, "
+            f"IsFirst={is_first}, IsEnd={is_end}"
         )
 
-        # 确定音频文件路径
         audio_path = self._resolve_audio_path(audio_local_path, audio_http_url)
         if not audio_path:
             logger.warning(f"无法获取有效音频文件: local={audio_local_path}")
             return
 
-        # 确定 avatar_id
+        if is_first:
+            self._audio_chunks = []
+            self._collect_username = username
+
+        self._audio_chunks.append((audio_path, text, audio_time))
+        logger.info(
+            f"音频片段已缓存 ({len(self._audio_chunks)} 段), "
+            f"等待 IsEnd 信号..."
+        )
+
+        if not is_end:
+            return
+
+        # ── IsEnd=1：所有片段到齐，开始处理 ──
+        chunks = list(self._audio_chunks)
+        self._audio_chunks = []
+        full_text = "".join(t for _, t, _ in chunks)
+        total_duration = sum(d for _, _, d in chunks)
+        logger.info(
+            f"所有音频片段到齐: {len(chunks)} 段, "
+            f"总时长={total_duration:.1f}s, 文本={full_text[:60]}..."
+        )
+
+        # 合并音频
+        if len(chunks) == 1:
+            merged_audio = chunks[0][0]
+        else:
+            merged_audio = await self._merge_audio_files(
+                [p for p, _, _ in chunks]
+            )
+            if not merged_audio:
+                logger.error("音频合并失败，跳过渲染")
+                self._record_result(
+                    username=username, text=full_text,
+                    status="failed", error="音频片段合并失败",
+                )
+                return
+
+        # 校验 avatar
         avatar_id = self._resolve_avatar_id(username)
         if not avatar_id:
             logger.warning(
@@ -272,45 +319,103 @@ class MuseTalkRendererWS:
                 f"default={self.default_avatar_id}"
             )
             self._record_result(
-                username=username, text=text, audio_path=audio_path,
+                username=username, text=full_text, audio_path=merged_audio,
                 status="skipped", error="无可用 avatar，请先上传视频并绑定",
             )
             return
 
-        # 获取 avatar 视频文件路径
         avatar_path = self.avatar_service.get_avatar_file(avatar_id, size="original")
         if not avatar_path or not os.path.exists(avatar_path):
             logger.warning(f"Avatar 文件不存在: avatar_id={avatar_id}")
             self._record_result(
-                username=username, text=text, audio_path=audio_path,
+                username=username, text=full_text, audio_path=merged_audio,
                 status="skipped", error=f"avatar 文件不存在: {avatar_id}",
             )
             return
 
-        # MuseTalk 需要视频输入，PNG/JPG 会导致 landmark 提取 division by zero
         _VIDEO_EXTS = (".mp4", ".avi", ".mov", ".mkv", ".webm")
         if not avatar_path.lower().endswith(_VIDEO_EXTS):
             logger.warning(
                 f"Avatar 文件不是视频格式 ({avatar_path})，MuseTalk 需要 mp4，跳过"
             )
             self._record_result(
-                username=username, text=text, audio_path=audio_path,
+                username=username, text=full_text, audio_path=merged_audio,
                 status="skipped",
                 error=f"avatar 不是视频格式: {os.path.basename(avatar_path)}",
             )
             return
 
-        # 启动异步渲染（不阻塞消息循环）
         asyncio.create_task(
             self._render_video(
-                audio_path=audio_path,
+                audio_path=merged_audio,
                 avatar_path=avatar_path,
                 avatar_id=avatar_id,
                 username=username or "default",
-                text=text,
-                audio_time=audio_time,
+                text=full_text,
+                audio_time=total_duration,
             )
         )
+
+    # ------------------------------------------------------------------
+    # 音频合并
+    # ------------------------------------------------------------------
+
+    async def _merge_audio_files(self, paths: list) -> Optional[str]:
+        """用 ffmpeg 将多个音频片段按顺序拼接成一个文件"""
+        import subprocess
+        import tempfile
+
+        temp_dir = settings.absolute_temp_dir
+        os.makedirs(temp_dir, exist_ok=True)
+
+        list_file = os.path.join(
+            temp_dir,
+            f"concat_{datetime.now().strftime('%Y%m%d_%H%M%S%f')}.txt",
+        )
+        out_path = os.path.join(
+            temp_dir,
+            f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S%f')}.mp3",
+        )
+
+        try:
+            with open(list_file, "w", encoding="utf-8") as f:
+                for p in paths:
+                    safe = p.replace("\\", "/").replace("'", "'\\''")
+                    f.write(f"file '{safe}'\n")
+
+            ffmpeg = getattr(settings, "FFMPEG_PATH", None) or "ffmpeg"
+            cmd = [
+                ffmpeg, "-y", "-f", "concat", "-safe", "0",
+                "-i", list_file, "-c", "copy", out_path,
+            ]
+            logger.info(f"合并 {len(paths)} 个音频: {' '.join(cmd)}")
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
+                logger.error(
+                    f"ffmpeg concat 失败 (rc={proc.returncode}): "
+                    f"{stderr.decode(errors='replace')[:500]}"
+                )
+                return None
+
+            logger.info(f"音频合并完成: {out_path}")
+            return out_path
+
+        except Exception as e:
+            logger.error(f"音频合并异常: {e}")
+            return None
+        finally:
+            if os.path.exists(list_file):
+                try:
+                    os.remove(list_file)
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------
     # MuseTalk 渲染

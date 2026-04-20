@@ -202,7 +202,7 @@ class FayClient:
 
     async def generate_reply_stream(self, user_text: str, username: str = "User") -> AsyncGenerator[str, None]:
         """
-        生成流式回复
+        生成流式回复——直接在 async with 内 yield，避免 stream closed 问题
 
         Args:
             user_text: 用户输入的文本
@@ -211,6 +211,9 @@ class FayClient:
         Yields:
             回复文本的流式片段
         """
+        if not self.client:
+            await self.initialize()
+
         messages = [
             Message(
                 role="system",
@@ -219,34 +222,40 @@ class FayClient:
             Message(role="user", content=user_text)
         ]
 
-        try:
-            response_generator = await self.chat_completion(
-                messages=messages,
-                temperature=0.7,
-                max_tokens=1000,
-                stream=True  # 使用流式模式
-            )
+        data = {
+            "model": self.model,
+            "messages": [msg.dict() for msg in messages],
+            "temperature": 0.7,
+            "max_tokens": 1000,
+            "stream": True,
+        }
 
-            if hasattr(response_generator, '__aiter__'):
-                async for chunk in response_generator:
+        try:
+            import json as _json
+
+            async with self.client.stream("POST", self.api_url, json=data) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
                     try:
                         chunk_str = chunk.decode('utf-8')
-                        lines = chunk_str.strip().split('\n')
-                        for line in lines:
-                            if line.startswith('data: '):
-                                data = line[6:]
-                                if data == '[DONE]':
-                                    break
-                                # 简化处理：直接返回数据
-                                yield data
+                        for line in chunk_str.strip().split('\n'):
+                            if not line.startswith('data: '):
+                                continue
+                            payload = line[6:].strip()
+                            if payload == '[DONE]':
+                                return
+                            try:
+                                obj = _json.loads(payload)
+                                delta = obj.get("choices", [{}])[0].get("delta", {})
+                                text = delta.get("content", "")
+                                if text:
+                                    yield text
+                            except _json.JSONDecodeError:
+                                if payload:
+                                    yield payload
                     except Exception as e:
                         logger.error(f"解析流式响应块失败: {e}")
                         continue
-            else:
-                # 如果返回的不是生成器，则作为普通响应处理
-                response = response_generator
-                content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
 
         except Exception as e:
             logger.error(f"生成流式回复失败: {e}")

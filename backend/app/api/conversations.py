@@ -233,39 +233,95 @@ async def generate_reply(
 async def generate_reply_stream(
     request: Request,
     conversation_request: ConversationRequest,
-    fay_service=Depends(get_fay_service)
+    fay_service=Depends(get_fay_service),
+    tts_service=Depends(get_tts_service),
+    musetalk_service=Depends(get_musetalk_service),
+    avatar_service=Depends(get_avatar_service)
 ):
     """
-    生成流式 Fay 回复
+    生成流式 Fay 回复，文字流式推送后自动触发 TTS + MuseTalk
 
-    返回 Server-Sent Events (SSE) 流式响应
+    SSE 事件序列：
+    1. {"chunk": "..."} — 流式文字片段
+    2. {"audio_url": "..."} — TTS 生成的音频 URL
+    3. {"video_generating": true} — MuseTalk 已开始生成视频（异步）
+    4. {"done": true} — 全部完成
     """
     from fastapi.responses import StreamingResponse
     import json
+    import time
+    import asyncio
 
     async def event_generator():
+        full_text = ""
         try:
             logger.info(f"生成流式回复请求: 用户='{conversation_request.username}', "
                        f"文本长度={len(conversation_request.text)}")
 
-            # 获取Fay客户端实例
             fay_client = fay_service.client
 
-            # 生成流式回复
             async for chunk in fay_client.generate_reply_stream(
                 user_text=conversation_request.text,
                 username=conversation_request.username
             ):
-                # 发送数据块
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                full_text += chunk
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
 
-            # 发送结束标记
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            logger.info(f"流式文字完成，回复长度={len(full_text)}")
 
         except Exception as e:
-            logger.error(f"生成流式回复失败: {e}")
-            error_msg = f"data: {json.dumps({'error': str(e)})}\n\n"
-            yield error_msg
+            logger.error(f"流式文字生成失败: {e}")
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            return
+
+        if not full_text.strip():
+            yield f"data: {json.dumps({'done': True})}\n\n"
+            return
+
+        # ── TTS ──
+        audio_url = None
+        try:
+            tts_result = await tts_service.synthesize(
+                text=full_text,
+                username=conversation_request.username or "User"
+            )
+            audio_url = tts_result.get("audio_url")
+            logger.info(f"TTS 音频合成成功: {audio_url}")
+            yield f"data: {json.dumps({'audio_url': audio_url}, ensure_ascii=False)}\n\n"
+        except Exception as tts_err:
+            logger.error(f"TTS 合成失败: {tts_err}")
+
+        # ── MuseTalk（异步启动，不阻塞 SSE） ──
+        avatar_id = conversation_request.avatar_id
+        if avatar_id and audio_url:
+            try:
+                avatar_path = avatar_service.get_avatar_file(avatar_id, size="original")
+                SUPPORTED_VIDEO_EXTS = (".mp4", ".avi", ".mov", ".mkv", ".webm")
+                if avatar_path and not avatar_path.lower().endswith(SUPPORTED_VIDEO_EXTS):
+                    logger.warning(f"头像非视频格式 ({avatar_path})，跳过 MuseTalk")
+                    avatar_path = None
+
+                if avatar_path and os.path.exists(avatar_path):
+                    audio_filename = audio_url.replace("/files/audio/", "") if audio_url else None
+                    audio_path = os.path.join(settings.absolute_audio_dir, audio_filename) if audio_filename else None
+
+                    if audio_path and os.path.exists(audio_path):
+                        logger.info(f"启动 MuseTalk: avatar={avatar_path}, audio={audio_path}")
+                        renderer = getattr(request.app.state, "musetalk_renderer", None)
+                        asyncio.create_task(
+                            _run_musetalk_background(musetalk_service, audio_path, avatar_path,
+                                                     conversation_request.username or "User",
+                                                     renderer=renderer, reply_text=full_text)
+                        )
+                        yield f"data: {json.dumps({'video_generating': True})}\n\n"
+                    else:
+                        logger.warning(f"音频文件不存在: {audio_path}")
+                else:
+                    logger.warning(f"头像文件不存在或非视频: {avatar_path}")
+            except Exception as mt_err:
+                logger.error(f"MuseTalk 启动失败: {mt_err}")
+
+        yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -273,9 +329,47 @@ async def generate_reply_stream(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 禁用Nginx缓冲
+            "X-Accel-Buffering": "no"
         }
     )
+
+
+async def _run_musetalk_background(musetalk_service, audio_path: str, avatar_path: str,
+                                   username: str, renderer=None, reply_text: str = ""):
+    """在后台运行 MuseTalk，不阻塞 SSE 流。完成后更新 renderer 的 latest_result 供前端轮询。"""
+    import time
+    start = time.time()
+    try:
+        result = await musetalk_service.generate_lip_sync_video(
+            audio_path=audio_path,
+            avatar_path=avatar_path,
+            username=username
+        )
+        video_url = result.get("video_url")
+        duration = time.time() - start
+        logger.info(f"MuseTalk 后台生成完成: {video_url} ({duration:.1f}s)")
+
+        if renderer:
+            renderer._record_result(
+                status="completed",
+                video_url=video_url,
+                text=reply_text[:100],
+                username=username,
+                duration=duration,
+                source="text_pipeline",
+            )
+    except Exception as e:
+        duration = time.time() - start
+        logger.error(f"MuseTalk 后台生成失败: {e}")
+        if renderer:
+            renderer._record_result(
+                status="failed",
+                error=str(e),
+                text=reply_text[:100],
+                username=username,
+                duration=duration,
+                source="text_pipeline",
+            )
 
 
 @router.get("/test", status_code=status.HTTP_200_OK)
